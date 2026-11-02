@@ -10,13 +10,10 @@
 
 ## 二、测试截图证据
 ### 1. 正常本地测试
-*(请把第一张截图拖拽到这一行下面)*
 <img width="1376" height="496" alt="屏幕截图 2026-10-26 134038" src="https://github.com/user-attachments/assets/9da0b94d-86cf-4bce-9592-a74ddc235f0e" />
 ### 2. 本地挂→切云端（关键证据）
-*(请把那张带 `[本地失败，自动切换云端]` 的黑框截图拖拽到这一行下面)*
 <img width="1398" height="372" alt="屏幕截图 2026-10-26 140105" src="https://github.com/user-attachments/assets/0adcd225-ad81-40b1-9874-ea623ac7ccdd" />
 ### 3. 云端挂→切本地
-*(请把那张带 `[云端失败，自动切换本地]` 的黑框截图拖拽到这一行下面)*
 <img width="1308" height="334" alt="屏幕截图 2026-10-26 140557" src="https://github.com/user-attachments/assets/522c2c08-637e-40c5-8290-5d2903a2802e" />
 ## 三、反思与选型判断
 - **隐私红线优先**：如果是批改学生包含真实姓名的作文，我会固定用 `prefer="local"`，确保数据不出本机。
