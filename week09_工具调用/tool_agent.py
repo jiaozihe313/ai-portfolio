@@ -19,8 +19,6 @@ import openai  # noqa: E402
 VOCAB = weekpath.data_path("生词表.csv")
 
 # 默认走 DeepSeek 云端；教师机演示可通过环境变量切到本机 Ollama
-# （OpenAI 兼容端点），例如 DEEPSEEK_BASE_URL=http://localhost:11434/v1
-# DEEPSEEK_MODEL=llama3.1:8b-local。不设置时行为与云端口径完全一致。
 MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
 _client = None
@@ -62,8 +60,7 @@ def _eval_node(node):
 
 
 def calc(expr):
-    """教学演示用：只做四则运算。为什么不用 eval？
-    因为 eval 会执行任意 Python 代码，是典型的安全反模式（本课程伦理红线之一）。"""
+    """教学演示用：只做四则运算。"""
     try:
         return str(_eval_node(ast.parse(str(expr), mode="eval")))
     except ZeroDivisionError:
@@ -80,26 +77,62 @@ def hsk_level(word):
     return "未找到 %s" % word
 
 
-TOOLS = {"get_time": get_time, "calc": calc, "hsk_level": hsk_level}
+# ---- 新增：作业2的第四工具（课文难度评估） ----
+def evaluate_text(text, target_level):
+    """评估课文难度：输入一段文字和目标等级（如'HSK 3'），返回超纲词列表。"""
+    word_dict = {}
+    try:
+        with open(VOCAB, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                lvl_str = row["HSK等级"].strip().replace("HSK", "").strip()
+                word_dict[row["词汇"].strip()] = lvl_str
+    except Exception as e:
+        return "读取生词表失败：%s" % e
 
-SYS = ("你是国际中文助教。可用工具只有这 3 个：get_time（查当前时间，无参数）、"
-       "calc（四则运算，如 calc('35*24')）、hsk_level（查生词 HSK 等级，如 hsk_level('把')）。"
+    out_of_syllabus = []
+    target_str = str(target_level).replace("HSK", "").strip()
+    
+    for char in text:
+        if char in word_dict:
+            level = word_dict[char]
+            try:
+                if int(target_str) < int(level):
+                    out_of_syllabus.append(char)
+            except ValueError:
+                pass
+    
+    out_of_syllabus = list(set(out_of_syllabus))
+    if not out_of_syllabus:
+        return "没有超纲词，完美符合 HSK %s 难度！" % target_str
+    else:
+        return "超纲词有：%s" % "、".join(out_of_syllabus)
+
+
+# 把新工具加进字典里
+TOOLS = {
+    "get_time": get_time, 
+    "calc": calc, 
+    "hsk_level": hsk_level,
+    "evaluate_text": evaluate_text
+}
+
+# 更新提示词，告诉模型有4个工具
+SYS = ("你是国际中文助教。可用工具只有这 4 个：get_time（查当前时间，无参数）、"
+       "calc（四则运算，如 calc('35*24')）、hsk_level（查生词 HSK 等级，如 hsk_level('把')）、"
+       "evaluate_text（评估课文难度，如 evaluate_text('我们学习中文', 'HSK 2')）。"
        '如需调用，只输出一行 JSON，格式：{"tool": "工具名", "args": [参数]}；'
        "一次只调用一个工具，绝不编造不存在的工具名；无需工具时直接回答。")
 
 
 def parse_calls(txt):
-    """容错解析：剥掉 ```json 围栏与前后客套话，返回全部工具调用（0/1/多个）。
-
-    模型不一定老实输出一个 JSON：可能带围栏、可能一段自然语言里夹着 JSON、
-    也可能把多个工具调用并列输出成多行——这里全部兜住。"""
+    """容错解析：剥掉 ```json 围栏与前后客套话，返回全部工具调用（0/1/多个）。"""
     s = (txt or "").strip()
     s = s.replace("```json", "").replace("```", "").strip()
     try:
         obj = json.loads(s)
         return [obj] if isinstance(obj, dict) else []
     except Exception:
-        m = re.search(r"\{.*\}", s, re.S)  # re.S：跨行也能匹配到 JSON 块
+        m = re.search(r"\{.*\}", s, re.S)
         if m:
             try:
                 obj = json.loads(m.group())
@@ -107,7 +140,6 @@ def parse_calls(txt):
                     return [obj]
             except Exception:
                 pass
-        # 多个工具调用并列输出（小模型常态）：逐块全部解析，一轮依次执行
         calls = []
         for blk in re.findall(r"\{[^{}]*\}", s):
             try:
@@ -127,8 +159,7 @@ def run(user_msg, max_calls=2):
         calls = [c for c in parse_calls(txt)
                  if isinstance(c.get("tool"), str) and c.get("tool") in TOOLS]
         if not calls:
-            return txt                                   # 没调用工具 → 直接回答
-        # 一轮内依次执行模型请求的全部工具，结果合并回喂
+            return txt
         results = []
         for call in calls:
             args = call.get("args") or []
@@ -141,7 +172,6 @@ def run(user_msg, max_calls=2):
                 results.append("工具执行失败：%s" % e)
         msgs += [{"role": "assistant", "content": txt},
                  {"role": "user", "content": "工具返回：%s。请据此作答。" % "；".join(results)}]
-    # 达到上限后强制收口，避免无限循环烧 token
     return get_client().chat.completions.create(
         model=MODEL, messages=msgs).choices[0].message.content
 
